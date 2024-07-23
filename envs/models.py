@@ -16,17 +16,17 @@ class GenericNetwork(nn.Module):
 
     def __init__(self, state_dim, action_dim, hidden_layer=400, learning_rate=5e-4, name='generic', chkpt_dir=''):
         super(GenericNetwork, self).__init__()
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.to(self.device)
         self.checkpoint_file = os.path.join(chkpt_dir, name)
         self.input_dims = state_dim
         self.hidden_layer = hidden_layer
         self.action_dim = action_dim
-        self.fc1 = nn.Linear(self.input_dims, self.hidden_layer)
-        self.fc2 = nn.Linear(self.hidden_layer, self.hidden_layer)
-        self.fc3 = nn.Linear(self.hidden_layer, self.action_dim)
+        self.fc1 = nn.Linear(self.input_dims, self.hidden_layer).to(self.device)
+        self.fc2 = nn.Linear(self.hidden_layer, self.hidden_layer).to(self.device)
+        self.fc3 = nn.Linear(self.hidden_layer, self.action_dim).to(self.device)
 
         self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
-        self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-        self.to(self.device)
         # self.init_weights()
 
     def init_weights(self):
@@ -46,7 +46,7 @@ class GenericNetwork(nn.Module):
         :return: Q(s, a) or Q(s(t+1), a')
         """
         # x = torch.Tensor(state).to(self.device)
-        x = F.relu(self.fc1(state))
+        x = F.relu(self.fc1(state.to(self.device)))
         x = F.relu(self.fc2(x))
         x = self.fc3(x)
         return x

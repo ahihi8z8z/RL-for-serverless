@@ -9,6 +9,7 @@ import torch.nn.functional as F
 class Agent:
     def __init__(self, state_space, n_actions, replay_buffer_size=50000,
                  batch_size=32, hidden_size=64, gamma=0.99):
+        self.device = T.device('cuda' if T.cuda.is_available() else 'cpu')
         self.n_actions = n_actions
         self.state_space_dim = state_space
         self.policy_net = GenericNetwork(state_space, n_actions, hidden_size, name='dqn_network_')
@@ -40,14 +41,14 @@ class Agent:
             non_final_mask = 1-T.tensor(batch.done, dtype=T.uint8)
 
         non_final_next_states = [s for nonfinal,s in zip(non_final_mask, batch.next_state) if nonfinal > 0]
-        non_final_next_states = T.stack(non_final_next_states)
-        state_batch = T.stack(batch.state)
-        action_batch = T.cat(batch.action)
-        reward_batch = T.cat(batch.reward)
+        non_final_next_states = T.stack(non_final_next_states).to(self.device)
+        state_batch = T.stack(batch.state).to(self.device)
+        action_batch = T.cat(batch.action).to(self.device)
+        reward_batch = T.cat(batch.reward).to(self.device)
 
         state_action_values = self.policy_net(state_batch).gather(1, action_batch)
 
-        next_state_values = T.zeros(self.batch_size)
+        next_state_values = T.zeros(self.batch_size).to(self.device)
         next_state_values[non_final_mask] = self.target_net(non_final_next_states).max(1)[0].detach()
 
         expected_state_action_values = (next_state_values * self.gamma) + reward_batch
@@ -74,7 +75,6 @@ class Agent:
                 q_values = self.policy_net(state)
                 action_mask_tensor = T.tensor(env.action_mask)
                 q_values[action_mask_tensor == 0] = float('-inf')
-                # print(len(q_values))
                 self.action[self.j] = {'list_of_actions': q_values, 
                                        'max': T.argmax(q_values).item()}
                 self.j += 1
