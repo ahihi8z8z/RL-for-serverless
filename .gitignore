@@ -1,3 +1,7 @@
+envs/target_dqn_network_
+envs/dqn_network_
+envs/log.txt
+envs/result/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
