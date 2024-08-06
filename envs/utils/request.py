@@ -1,5 +1,6 @@
 import numpy as np
 import math
+import uuid
 
 '''
 Define resource usage for request type:
@@ -17,6 +18,7 @@ Request_active_time = np.array([240, 200, 300, 400])
 class Request():
     def __init__(self, type: int, state: int = 0, 
                 timeout: int = 0, in_queue_time: int = 0, max_active_time: int = 0):
+        self._uuid = uuid.uuid1()
         self.type = type
         self.time_out =  timeout 
         self.in_queue_time = in_queue_time

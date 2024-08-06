@@ -9,7 +9,7 @@ import torch
 
 def main(args):
     # Environment variable
-    num_service = 2
+    num_service = 1
     log_file = "log.txt"
 
     # DQN_agent
@@ -69,9 +69,10 @@ def main(args):
         eps = max(eps_end, eps_decay*eps)
         cumulative_rewards.append(cum_reward)
         with open(log_file, 'a') as f:
+            f.write("State:\n {}\n".format(env._env_matrix))
             f.write("Episode: {}/{}, sub_episode: {}, reward: {}\n".format(e, episodes, env.current_time, cum_reward))
-        if e > 100:
-            avg = np.mean(cumulative_rewards[-100:])
+        if e > max_env_steps:
+            avg = np.mean(cumulative_rewards[-max_env_steps:])
         else:
             avg = np.mean(cumulative_rewards)
         avg_reward_list.append(avg)
@@ -83,10 +84,10 @@ def main(args):
         plt.ylabel('Cumulative reward')
         plt.grid(True)
         plt.plot(rewards_t.numpy())
-        # Take 100 episode averages and plot them too
-        if len(rewards_t) >= 100:
-            means = rewards_t.unfold(0, 100, 1).mean(1).view(-1)
-            means = torch.cat((torch.zeros(99), means))
+        # Take max_env_steps episode averages and plot them too
+        if len(rewards_t) >= max_env_steps:
+            means = rewards_t.unfold(0, max_env_steps, 1).mean(1).view(-1)
+            means = torch.cat((torch.zeros(max_env_steps-1), means))
             plt.plot(means.numpy())
         plt.pause(0.001)  # pause a bit so that plots are updated
         plt.savefig('{}/live_average_rewards_DQN_3mec_10vnf.png'.format(args['file']))
@@ -103,7 +104,7 @@ def main(args):
 
         plt.plot(cumulative_rewards)
         plt.plot(avg_reward_list)
-        plt.legend(["Reward", "100-episode average"])
+        plt.legend(["Reward", "{}-episode average".format(max_env_steps)])
         plt.title("Reward history")
         plt.savefig('{}/live_average_rewards_dqn_{}_final.png'.format(args['file'], args['train']))
         plt.close()

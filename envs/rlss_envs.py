@@ -125,8 +125,8 @@ class ServerlessEnv(gym.Env):
         
         self.num_rq_state = len([attr for attr in vars(Container_States) if not attr.startswith('__')])         
         self.rq_timeout = 10  
-        self.max_rq_active_time = 120 # Set to 0 for static request active time 240s
-        self.average_requests = 5/60  # Set the average incoming requests per second 
+        self.max_rq_active_time = 60 # Set to 0 for static request active time 240s
+        self.average_requests = 20/60  # Set the average incoming requests per second 
         self.max_num_request = int(self.average_requests*self.timestep*2)  # Set the limit number of requests that can exist in the system 
         
         self.num_resources = len([attr for attr in vars(Resource_Type) if not attr.startswith('__')]) - 1    # The number of resource parameters (RAM, CPU, Power)
@@ -300,7 +300,7 @@ class ServerlessEnv(gym.Env):
 
     def _get_reward(self):
 
-        self.temp_reward = self.profit - 0.1*(0.05*self.delay_penalty + 0.05*self.abandone_penalty + 0.9*self.energy_cost)
+        self.temp_reward = self.profit - 0.01*(0.05*self.delay_penalty + 0.05*self.abandone_penalty + 0.9*self.energy_cost)
         return self.temp_reward
     
     def reset(self, seed=None, options=None):
@@ -407,32 +407,32 @@ class ServerlessEnv(gym.Env):
                 trans_type = self.formatted_action[1][service]
                 if relative_time == Transitions_cost[trans_type][Resource_Type.Time]:
                     self._container_matrix[service] += self._positive_action_matrix[service]
-                          
-                for request in self._in_queue_requests[service]:
-                    if request.in_queue_time <= self.current_time:
+                
+                for rq in self._in_queue_requests[service][:]:
+                    if rq.in_queue_time <= self.current_time:
                         # Giải phóng các request bị time_out
-                        if request.time_out == self.current_time - request.in_queue_time:
-                            request.set_state(Request_States.Time_Out)
-                            request.set_out_system_time(self.current_time)
-                            self._timeout_requests[service].append(request)
-                            self._in_queue_requests[service].remove(request)
+                        if self.current_time == rq.time_out + rq.in_queue_time:
+                            rq.set_state(Request_States.Time_Out)
+                            rq.set_out_system_time(self.current_time)
+                            self._timeout_requests[service].append(rq)
+                            self._in_queue_requests[service].remove(rq)
                         else:
                             # Nếu còn tài nguyên trống, đẩy request vào 
                             if self._container_matrix[service][Container_States.Warm_CPU] > 0:
-                                request.set_state(Request_States.In_System)
-                                request.set_in_system_time(self.current_time)
-                                self._in_system_requests[service].append(request)
-                                self._in_queue_requests[service].remove(request)
+                                rq.set_state(Request_States.In_System)
+                                rq.set_in_system_time(self.current_time)
+                                self._in_system_requests[service].append(rq)
+                                self._in_queue_requests[service].remove(rq)
                                 self._container_matrix[service][Container_States.Active] += 1
                                 self._container_matrix[service][Container_States.Warm_CPU] -= 1
-                                
-                for request in self._in_system_requests[service]:
+         
+                for rq in self._in_system_requests[service][:]:
                     # Giải phóng các request đã thực hiện xong
-                    if request.active_time == self.current_time - request.in_system_time:
-                        request.set_state(Request_States.Done)
-                        request.set_out_system_time(self.current_time)
-                        self._done_requests[service].append(request)
-                        self._in_system_requests[service].remove(request)
+                    if rq.active_time == self.current_time - rq.in_system_time:
+                        rq.set_state(Request_States.Done)
+                        rq.set_out_system_time(self.current_time)
+                        self._done_requests[service].append(rq)
+                        self._in_system_requests[service].remove(rq)
                         self._container_matrix[service][Container_States.Active] -= 1
                         self._container_matrix[service][Container_States.Warm_CPU] += 1
                 
@@ -447,9 +447,11 @@ class ServerlessEnv(gym.Env):
     def  _cal_env_matrix(self):
         self._env_matrix[:,0:self.num_ctn_states]=self._container_matrix
         for service in range(self.num_service):
-            for request in self._in_queue_requests[service]:
-                if  0 <= self.current_time - request.in_queue_time <= self.timestep:
-                    self._env_matrix[service][self.num_ctn_states+Request_States.In_Queue] += 1    
+            self._env_matrix[service][self.num_ctn_states+Request_States.In_Queue] = len(self._in_queue_requests[service])
+            # for request in self._in_queue_requests[service]:
+                
+                # if  0 <= self.current_time - request.in_queue_time <= self.timestep:
+                #     self._env_matrix[service][self.num_ctn_states+Request_States.In_Queue] += 1    
                              
     def _cal_temp_reward(self):
         # TODO: đơn giản hóa reward, 
@@ -603,6 +605,7 @@ if __name__ == "__main__":
             break
         if (terminated): 
             print("--------------------------------cff--------")
+            break
             env.reset()
         else: continue
     
