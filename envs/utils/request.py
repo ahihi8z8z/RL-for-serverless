@@ -14,10 +14,18 @@ Request_usage = np.array([np.array([10, 10, 10]),
 
 Request_active_time = np.array([240, 200, 300, 400])
 
+def ran_norm_gen(mean, std_dev):
+    # Generate a random value following normal distribution
+    value = np.random.normal(loc=mean, scale=std_dev)
+    # Round to the nearest integer
+    int_value = round(value)
+    # Ensure the value is greater than 0
+    positive_int_value = max(1, int_value)  # Ensures the value is at least 1
+    return positive_int_value
 
 class Request():
     def __init__(self, type: int, state: int = 0, 
-                timeout: int = 0, in_queue_time: int = 0, max_active_time: int = 0):
+                timeout: int = 0, in_queue_time: int = 0, active_time: int = 0):
         self._uuid = uuid.uuid1()
         self.type = type
         self.time_out =  timeout 
@@ -26,7 +34,7 @@ class Request():
         self.out_system_time = 0
         self.state = state 
         self.resource_usage = None
-        self.active_time = np.random.randint(1,max_active_time) if max_active_time else Request_active_time[self.type]
+        self.active_time = active_time
         self.set_resource_usage()
 
     def set_resource_usage(self):
@@ -60,6 +68,13 @@ def generate_requests( current_time, size: int = 4, duration: int = 10, avg_requ
     for arrival_time in arrival_times:
         # Kiểm tra nếu thời gian đến vẫn nằm trong khoảng thời gian duration
         if arrival_time < duration :
-            request = Request(type=rng.integers(0, size), in_queue_time=int(arrival_time+current_time), timeout=timeout, max_active_time=max_rq_active_time)
+            type = rng.integers(0, size)
+            
+            if max_rq_active_time["type"] == "random":
+                active_time = ran_norm_gen(max_rq_active_time["value"], max_rq_active_time["value"]/10)
+            else:
+                active_time = max_rq_active_time["value"] if max_rq_active_time["value"] else Request_active_time[type]
+            
+            request = Request(type=type, in_queue_time=int(arrival_time+current_time), timeout=timeout, active_time=active_time)    
             requests.append(request)
     return requests

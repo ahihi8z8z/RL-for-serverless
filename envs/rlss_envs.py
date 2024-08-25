@@ -53,9 +53,9 @@ Define resource usage of request:
  Request type: [RAM, CPU, Power]  
 '''      
 Request_Resource_Usage = np.array([np.array([10, 10, 100]),   
-                          np.array([20, 20, 200]),   
-                          np.array([30, 30, 300]),   
-                          np.array([40, 40, 400])])   
+                                   np.array([20, 20, 200]),   
+                                   np.array([30, 30, 300]),   
+                                   np.array([40, 40, 400])])   
     
 '''
 Define cases where state changes can occur:
@@ -98,9 +98,9 @@ Define resource usage for staying in each state:
 '''    
 Container_Resource_Usage =np.array([np.array([10, 10, 1000]),   # N
                           np.array([20, 20, 2000]),             # L0
-                          np.array([30, 30, 3000]),            # L1
-                          np.array([40, 40, 4000]),            # L2
-                          np.array([40, 40, 4000])])           # A
+                          np.array([30, 30, 3000]),             # L1
+                          np.array([40, 40, 4000]),             # L2
+                          np.array([40, 40, 4000])])            # A
 
 
 class ServerlessEnv(gym.Env):
@@ -118,15 +118,15 @@ class ServerlessEnv(gym.Env):
         self.num_ctn_states = len([attr for attr in vars(Container_States) if not attr.startswith('__')])  
         self.num_trans = Transitions.shape[0] - 1
         
-        self.max_container = 50
+        self.max_container = 100
         self.num_container = np.floor(self.max_container / self.num_service * np.ones(self.num_service),dtype=float) # số lượng container mỗi service
         self.num_container.astype(int)
-        self.container_lifetime = 3600*4  # Set lifetime of a container  
+        self.container_lifetime = 3600*12  # Set lifetime of a container  
         
         self.num_rq_state = len([attr for attr in vars(Container_States) if not attr.startswith('__')])         
-        self.rq_timeout = 10  
-        self.max_rq_active_time = 60 # Set to 0 for static request active time 240s
-        self.average_requests = 20/60  # Set the average incoming requests per second 
+        self.rq_timeout = 20  
+        self.max_rq_active_time = {"type": "random", "value": 30} # "random" or "static"
+        self.average_requests = 40/60  # Set the average incoming requests per second 
         self.max_num_request = int(self.average_requests*self.timestep*2)  # Set the limit number of requests that can exist in the system 
         
         self.num_resources = len([attr for attr in vars(Resource_Type) if not attr.startswith('__')]) - 1    # The number of resource parameters (RAM, CPU, Power)
@@ -134,6 +134,9 @@ class ServerlessEnv(gym.Env):
         self.energy_price = 10e-8 # unit cent/Jun/s 
         self.ram_profit = 100*10e-8 # unit cent/Gb/s
         self.cpu_profit = 100*10e-8 # unit cent/vcpu/s
+        self.alpha = 0.01*0.05
+        self.beta = 0.01*0.05
+        self.gamma = 0.01*0.9
         
         '''
         Initialize the state and other variables
@@ -155,6 +158,16 @@ class ServerlessEnv(gym.Env):
         self._done_requests = [[] for _ in range(self.num_service)] # Done requests cache in a timestep
         self._new_requests = [[] for _ in range(self.num_service)] # New incoming requests cache in a timestep
         self._timeout_requests = [[] for _ in range(self.num_service)] # Timeout requests cache in a timestep
+        
+        # Thông số tức thời của hệ thống
+        self.num_all_rq = 0
+        self.num_accepted_rq = 0
+        self.num_new_rq = 0
+        self.num_in_queue_rq = 0
+        self.num_in_sys_rq = 0
+        self.num_done_rq = 0
+        self.num_rejected_rq = 0
+
         
         self.current_action = 0
         self._action_matrix = np.zeros(shape=(self.num_service,self.num_ctn_states)) 
@@ -203,6 +216,7 @@ class ServerlessEnv(gym.Env):
             f.write("- Number service: {}\n".format(self.num_service))
             f.write("- Number container each service: {}\n".format(self.num_container))
             f.write("- Number request per timestep: {}\n".format(self.average_requests*self.timestep))
+            f.write("- Reward parameters: (alpha:{}) - (beta:{}) - (gamma:{})\n".format(self.alpha, self.beta, self.gamma))
             f.write("\n")
             
             
@@ -289,18 +303,10 @@ class ServerlessEnv(gym.Env):
         self._cal_env_matrix()   
         return spaces.flatten(self.raw_state_space,self._env_matrix)
 
-    # def _get_info(self):
-    #     '''
-    #     Defines a function that returns system evaluation parameters
-    #     '''
-        
-    #     return {
-    #         "current_step": int(self.current_time/self.timestep)
-    #     }
 
     def _get_reward(self):
 
-        self.temp_reward = self.profit - 0.01*(0.05*self.delay_penalty + 0.05*self.abandone_penalty + 0.9*self.energy_cost)
+        self.temp_reward = self.profit - (self.alpha*self.delay_penalty + self.beta*self.abandone_penalty + self.gamma*self.energy_cost)
         return self.temp_reward
     
     def reset(self, seed=None, options=None):
@@ -321,12 +327,20 @@ class ServerlessEnv(gym.Env):
         
         self.action_mask.fill(0)
         
-        self._all_requests =  [[] for _ in range(self.num_service)] # All request come into system
-        self._in_queue_requests = [[] for _ in range(self.num_service)] # Requests in queue until current time
-        self._in_system_requests = [[] for _ in range(self.num_service)] # Accepted requests in system until current time
-        self._done_requests = [[] for _ in range(self.num_service)] # Done requests cache in a timestep
-        self._new_requests = [[] for _ in range(self.num_service)] # New incoming requests cache in a timestep
-        self._timeout_requests = [[] for _ in range(self.num_service)] # Timeout requests cache in a timestep
+        self._all_requests =  [[] for _ in range(self.num_service)] 
+        self._in_queue_requests = [[] for _ in range(self.num_service)] 
+        self._in_system_requests = [[] for _ in range(self.num_service)] 
+        self._done_requests = [[] for _ in range(self.num_service)] 
+        self._new_requests = [[] for _ in range(self.num_service)] 
+        self._timeout_requests = [[] for _ in range(self.num_service)] 
+        
+        self.num_all_rq = 0
+        self.num_accepted_rq = 0
+        self.num_new_rq = 0
+        self.num_in_queue_rq = 0
+        self.num_in_sys_rq = 0
+        self.num_done_rq = 0
+        self.num_rejected_rq = 0
     
         self.truncated = False
         self.terminated = False
@@ -336,6 +350,13 @@ class ServerlessEnv(gym.Env):
         return observation
      
     def _cal_system_resource(self, relative_time):
+        
+        self.num_in_queue_rq = sum(len(rqs) for rqs in self._in_queue_requests)
+        self.num_new_rq = sum(len(rqs) for rqs in self._new_requests)
+        self.num_in_sys_rq = sum(len(rqs) for rqs in self._in_system_requests)
+        self.num_done_rq = sum(len(rqs) for rqs in self._done_requests)
+        self.num_rejected_rq = sum(len(rqs) for rqs in self._timeout_requests)
+        
         # Tính tài nguyên tiêu thụ trên toàn hệ thống sau khi thực hiện action
         self.current_resource_usage.fill(0)
         for resource in range(self.num_resources):
@@ -362,6 +383,7 @@ class ServerlessEnv(gym.Env):
                                            avg_requests_per_second=self.average_requests,
                                            timeout=self.rq_timeout,
                                            max_rq_active_time=self.max_rq_active_time)
+        self.num_all_rq += len(new_requets)
         for request in new_requets:
             self._new_requests[request.type].append(request)
             self._all_requests[request.type].append(request)
@@ -421,6 +443,7 @@ class ServerlessEnv(gym.Env):
                             if self._container_matrix[service][Container_States.Warm_CPU] > 0:
                                 rq.set_state(Request_States.In_System)
                                 rq.set_in_system_time(self.current_time)
+                                self.num_accepted_rq += 1
                                 self._in_system_requests[service].append(rq)
                                 self._in_queue_requests[service].remove(rq)
                                 self._container_matrix[service][Container_States.Active] += 1
@@ -435,11 +458,13 @@ class ServerlessEnv(gym.Env):
                         self._in_system_requests[service].remove(rq)
                         self._container_matrix[service][Container_States.Active] -= 1
                         self._container_matrix[service][Container_States.Warm_CPU] += 1
+            
+            
                 
-                # Tính năng lượng tiêu tốn trên toàn bộ hệ thống
-                self._cal_system_resource(relative_time)
-                # Tính reward tức thời cho thời điểm hiện tại
-                self._cal_temp_reward() 
+            # Tính năng lượng tiêu tốn trên toàn bộ hệ thống
+            self._cal_system_resource(relative_time)
+            # Tính reward tức thời cho thời điểm hiện tại
+            self._cal_temp_reward() 
                 
             self.current_time += 1
             relative_time += 1
@@ -532,7 +557,6 @@ class ServerlessEnv(gym.Env):
         '''
         Implement a visualization method
         '''
-        
 
         with open(self.log_file, 'a') as f:
             f.write("-------------------------------------------------------------\n")
@@ -540,20 +564,22 @@ class ServerlessEnv(gym.Env):
             f.write("- Action number: {}\n".format(self.current_action))
             f.write("- Action matrix: \n{}\n".format(self._action_matrix))
             f.write("- Containers state after action: \n{}\n".format(self._container_matrix))
-            f.write("- Number new request: {}\n".format(sum(len(rqs) for rqs in self._new_requests)))
-            f.write("- Number in queue request: {}\n".format(sum(len(rqs) for rqs in self._in_queue_requests)))
-            f.write("- Number in system request: {}\n".format(sum(len(rqs) for rqs in self._in_system_requests)))
-            f.write("- Number done system request: {}\n".format(sum(len(rqs) for rqs in self._done_requests)))
-            f.write("- Number timeout system request: {}\n".format(sum(len(rqs) for rqs in self._timeout_requests)))
+            f.write("- Cumulative number request : {}\n".format(self.num_all_rq))
+            f.write("- Cumulative number accpeted request : {}\n".format(self.num_accepted_rq))
+            f.write("- Number new request: {}\n".format(self.num_new_rq))
+            f.write("- Number in queue request: {}\n".format(self.num_in_queue_rq))
+            f.write("- Number in system request: {}\n".format(self.num_in_sys_rq))
+            f.write("- Number done system request: {}\n".format(self.num_done_rq))
+            f.write("- Number timeout system request: {}\n".format(self.num_rejected_rq))
             f.write("- Rewards: {:.2f} = ".format(self.temp_reward))
             f.write("(Profit: {:.2f}) - ".format(self.profit))
-            f.write("α*(Abandone penalty: {:.2f}) - ".format(self.abandone_penalty))
-            f.write("β*(Delay penalty: {:.2f}) - ".format(self.delay_penalty))
-            f.write("γ*(Energy cost: {:.2f})\n".format(self.energy_cost))
+            f.write("{:.2f}*(Abandone penalty: {:.2f}) - ".format(self.alpha, self.abandone_penalty))
+            f.write("{:.2f}*(Delay penalty: {:.2f}) - ".format(self.beta, self.delay_penalty))
+            f.write("{:.2f}*(Energy cost: {:.2f})\n".format(self.gamma, self.energy_cost))
             f.write("Energy Consumption : {:.2f}J, ".format(self.current_resource_usage[Resource_Type.Power]))
             f.write("RAM Consumption  : {:.2f}Gb, ".format(self.current_resource_usage[Resource_Type.RAM]))
             f.write("CPU Consumption  : {:.2f}Core \n".format(self.current_resource_usage[Resource_Type.CPU]))
-            f.write("\n")
+            
     def action_to_number(self, action_matrix):
         index = 0
         multiplier = 1
