@@ -1,8 +1,8 @@
 envs/target_dqn_network_
 envs/dqn_network_
-envs/log.txt
-log.txt
+envs/test.py
 envs/result/
+envs/live_average_rewards_DQN.png
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
