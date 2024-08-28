@@ -22,9 +22,9 @@ class GenericNetwork(nn.Module):
         self.input_dims = state_dim
         self.hidden_layer = hidden_layer
         self.action_dim = action_dim
-        self.fc1 = nn.Linear(self.input_dims, self.hidden_layer).to(self.device)
-        self.fc2 = nn.Linear(self.hidden_layer, self.hidden_layer).to(self.device)
-        self.fc3 = nn.Linear(self.hidden_layer, self.action_dim).to(self.device)
+        self.fc1 = nn.Linear(self.input_dims, self.hidden_layer,device=self.device)
+        self.fc2 = nn.Linear(self.hidden_layer, self.hidden_layer,device=self.device)
+        self.fc3 = nn.Linear(self.hidden_layer, self.action_dim,device=self.device)
 
         self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
         # self.init_weights()
