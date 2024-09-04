@@ -9,6 +9,7 @@ import json
 import os
 import time
 from datetime import datetime
+
 from utils.log_plot import plot_log_fig
 
 now = datetime.now()
@@ -81,8 +82,7 @@ def test(args, env_config, drl_hyper_params):
             f.write("\n********************************************************************************\n\n\n")
     
     plot_log_fig(folder_name)
-
-            
+          
 # Training the model            
 def train(args, env_config, drl_hyper_params):
     folder_name = os.path.join(folder_base, 'train')
@@ -118,6 +118,7 @@ def train(args, env_config, drl_hyper_params):
     avg_reward_list = []
     rewards = []
     cumulative_rewards = []
+    
     
     for e in range(drl_hyper_params["episodes"]):
         state = env.reset()
@@ -205,11 +206,11 @@ def main(args):
     # Environment variable
     num_service = 2
     timestep = 120
-    num_container = [80, 20]
-    container_lifetime = 3600*8
+    num_container = [40, 60]
+    container_lifetime = 3600*4
     rq_timeout = [20,40]
-    average_requests = 80/60
-    max_rq_active_time = {"type": "random", "value": [60,100]}
+    average_requests = 80/timestep
+    max_rq_active_time = {"type": "random", "value": [40,60]}
     energy_price = 10e-8 
     ram_profit = 10e-5
     cpu_profit = 10e-5
@@ -219,13 +220,13 @@ def main(args):
 
 
     # DQN_agent
-    episodes = 10                        # Total episodes for the training
+    episodes = 200                        # Total episodes for the training
     batch_size = 32                        # Total used memory in memory replay mode
     max_env_steps = 50                    # Max steps per episode
-    batch_update = 20
+    batch_update = 5
     
     replay_buffer_size=50000
-    hidden_size=400
+    hidden_size=64
     gamma=0.1
     learning_rate=5e-4
     eps = 0.05

@@ -110,7 +110,6 @@ def plot_log_fig(log_folder):
     ])
     avg_container_state = np.split(avg_container_state,service_num,axis=1)
     avg_container_state = [arr.squeeze(axis=1) for arr in avg_container_state]
-    print(avg_container_state[0].shape)
   
     avg_rewards = [
         np.mean(rewards[i::num_step]) 
