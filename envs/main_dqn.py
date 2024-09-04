@@ -294,23 +294,15 @@ def train(args, env_config, drl_hyper_params):
         cum_reward = 0
         sub_episode = 0
         while not done:
-            t1 = time.time()
             action = agent.get_action(state=state,env=env,epsilon=drl_hyper_params["epsilon"])
-            print("get action: {}\n".format(time.time()-t1))
-            t1 = time.time()
             next_state, reward, done, _ = env.step(action)
-            print("step: {}\n".format(time.time()-t1))
-            t1 = time.time()
             env.render()
-            print("render: {}\n".format(time.time()-t1))
-            t1 = time.time()
             tab[e * env.current_time + env.current_time] = {"action": action, "reward": reward, "next_state": next_state}
             next_state = np.reshape(next_state, [state_dim])
             agent.store_transition(state, action, reward, next_state, done)
             state = next_state
             agent.learn()
             rewards.append(reward)
-            print("other: {}\n".format(time.time()-t1))
             cum_reward += reward
             sub_episode += 1
             
