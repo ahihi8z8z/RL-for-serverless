@@ -4,6 +4,7 @@ import gymnasium as gym
 from gymnasium import spaces
 
 import utils.request as rq
+from utils.request import Request_Resource_Usage
 import itertools
 import math
 import time
@@ -39,6 +40,10 @@ class Container_States:
     Warm_Disk = 2
     Warm_CPU = 3
     Active = 4
+    State_Name = ["Null", "Cold", "Warm Disk", "Warm CPU", "Active"]
+
+
+
    
 '''    
 Defines request state:
@@ -47,16 +52,7 @@ class Request_States:
     In_Queue = 0
     In_System = 1
     Time_Out = 2
-    Done = 3
-
-'''
-Define resource usage of request:
- Request type: [RAM, CPU, Power]  
-'''      
-Request_Resource_Usage = np.array([np.array([10, 10, 100]),   
-                                   np.array([20, 20, 200]),   
-                                   np.array([30, 30, 300]),   
-                                   np.array([40, 40, 400])])   
+    Done = 3    
     
 '''
 Define cases where state changes can occur:
@@ -82,14 +78,14 @@ State_trans_mapping =np.array([np.array([1,2]),                 # N
 Define transition cost for moving to another states:
  state: [RAM, CPU, Power, Time]  
 '''    
-Transitions_cost = np.array([np.array([1.2, 0, 0, 0]),         # No change 
+Transitions_cost = np.array([np.array([2, 0, 0, 0]),         # No change 
                              np.array([0, 0, 50, 5]),          # N -> L0
-                             np.array([0.9, 0, 2150, 62]),     # N -> L2
+                             np.array([1, 0, 2150, 62]),     # N -> L2
                              np.array([0, 0, 50, 2]),          # L0 -> N
                              np.array([0, 0, 2000, 50]),       # L0 -> L1
-                             np.array([0.9, 0, 2100, 57]),     # L0 -> L2
+                             np.array([1, 0, 2100, 57]),     # L0 -> L2
                              np.array([0, 0, 50, 2]),          # L1 -> L0
-                             np.array([0.9, 0, 100, 7]),       # L1 -> L2
+                             np.array([1, 0, 100, 7]),       # L1 -> L2
                              np.array([0, 0, 400, 30])])       # L2 -> L1 
 
 '''
@@ -112,9 +108,9 @@ class ServerlessEnv(gym.Env):
                                    "timestep": 120,
                                    "num_container": [100],
                                    "container_lifetime": 3600*8,
-                                   "rq_timeout": 20,
+                                   "rq_timeout": [20],
                                    "average_requests": 40/60,
-                                   "max_rq_active_time": {"type": "random", "value": 60},
+                                   "max_rq_active_time": {"type": "random", "value": [60]},
                                    "energy_price": 10e-8, 
                                    "ram_profit": 10e-6,
                                    "cpu_profit": 10e-6,
@@ -130,13 +126,13 @@ class ServerlessEnv(gym.Env):
         self.timestep = 120 
         
         self.num_service = env_config["num_service"]  # The number of services
-        self.num_ctn_states = len([attr for attr in vars(Container_States) if not attr.startswith('__')])  
+        self.num_ctn_states = len(Container_States.State_Name)
         self.num_trans = Transitions.shape[0] - 1
         
         self.num_container = np.array(env_config["num_container"])
         self.container_lifetime = env_config["container_lifetime"]  # Set lifetime of a container  
         
-        self.num_rq_state = len([attr for attr in vars(Container_States) if not attr.startswith('__')])         
+        self.num_rq_state = len(Container_States.State_Name)  
         self.rq_timeout = env_config["rq_timeout"] 
         self.max_rq_active_time = env_config["max_rq_active_time"]  # "random" or "static"
         self.average_requests = env_config["average_requests"]  # Set the average incoming requests per second 
@@ -162,24 +158,24 @@ class ServerlessEnv(gym.Env):
         self.delay_penalty = 0
         self.profit = 0
         self.energy_cost = 0
-        self.current_resource_usage = np.zeros(self.num_resources)
+        self.current_resource_usage = np.zeros(self.num_resources,dtype=np.int64)
+        self.resource_consumption = np.zeros(self.num_resources,dtype=np.int64)
         
-        
-        self._all_requests =  [[] for _ in range(self.num_service)] # All request come into system
+
         self._in_queue_requests = [[] for _ in range(self.num_service)] # Requests in queue until current time
         self._in_system_requests = [[] for _ in range(self.num_service)] # Accepted requests in system until current time
         self._done_requests = [[] for _ in range(self.num_service)] # Done requests cache in a timestep
         self._new_requests = [[] for _ in range(self.num_service)] # New incoming requests cache in a timestep
         self._timeout_requests = [[] for _ in range(self.num_service)] # Timeout requests cache in a timestep
         
-        # Thông số tức thời của hệ thống
-        self.num_all_rq = 0
-        self.num_accepted_rq = 0
-        self.num_new_rq = 0
-        self.num_in_queue_rq = 0
-        self.num_in_sys_rq = 0
-        self.num_done_rq = 0
-        self.num_rejected_rq = 0
+        self.num_all_rq = np.zeros(self.num_service,dtype=np.int32)
+        self.num_accepted_rq = np.zeros(self.num_service,dtype=np.int32)
+        self.num_new_rq = np.zeros(self.num_service,dtype=np.int32)
+        self.num_in_queue_rq = np.zeros(self.num_service,dtype=np.int32)
+        self.num_in_sys_rq = np.zeros(self.num_service,dtype=np.int32)
+        self.num_done_rq = np.zeros(self.num_service,dtype=np.int32)
+        self.num_rejected_rq = np.zeros(self.num_service,dtype=np.int32)
+        self.cu_rq_delay = np.zeros(self.num_service,dtype=np.int32)
 
         
         self.current_action = 0
@@ -331,20 +327,21 @@ class ServerlessEnv(gym.Env):
         self.action_mask.fill(0)
         self._cal_action_mask()
         
-        self._all_requests =  [[] for _ in range(self.num_service)] 
         self._in_queue_requests = [[] for _ in range(self.num_service)] 
         self._in_system_requests = [[] for _ in range(self.num_service)] 
         self._done_requests = [[] for _ in range(self.num_service)] 
         self._new_requests = [[] for _ in range(self.num_service)] 
         self._timeout_requests = [[] for _ in range(self.num_service)] 
         
-        self.num_all_rq = 0
-        self.num_accepted_rq = 0
-        self.num_new_rq = 0
-        self.num_in_queue_rq = 0
-        self.num_in_sys_rq = 0
-        self.num_done_rq = 0
-        self.num_rejected_rq = 0
+        self.num_all_rq.fill(0)
+        self.num_accepted_rq.fill(0)
+        self.num_new_rq.fill(0)
+        self.num_in_queue_rq.fill(0)
+        self.num_in_sys_rq.fill(0)
+        self.num_done_rq.fill(0)
+        self.num_rejected_rq.fill(0)
+        self.cu_rq_delay.fill(0)
+        self.resource_consumption.fill(0)
     
         self.truncated = False
         self.terminated = False
@@ -354,44 +351,37 @@ class ServerlessEnv(gym.Env):
         return observation
      
     def _cal_system_resource(self, relative_time):
-        
-        self.num_in_queue_rq = sum(len(rqs) for rqs in self._in_queue_requests)
-        self.num_new_rq = sum(len(rqs) for rqs in self._new_requests)
-        self.num_in_sys_rq = sum(len(rqs) for rqs in self._in_system_requests)
-        self.num_done_rq = sum(len(rqs) for rqs in self._done_requests)
-        self.num_rejected_rq = sum(len(rqs) for rqs in self._timeout_requests)
-        
-        # Tính tài nguyên tiêu thụ trên toàn hệ thống sau khi thực hiện action
-        self.current_resource_usage.fill(0)
+        # Tài nguyên tiêu thụ tức thời tại các trạng thái của container
+        self.current_resource_usage = np.sum(np.dot(self._container_matrix,Container_Resource_Usage),axis=0)
         for resource in range(self.num_resources):
             for service in range(self.num_service):
                 # Tài nguyên tiêu thụ tức thời bởi các request trong hệ thống
                 for request in self._in_system_requests[service]:
                     self.current_resource_usage[resource] += request.resource_usage[resource]
-                
-                for state in range(self.num_ctn_states):
-                    # Tài nguyên tiêu thụ tức thời tại các trạng thái của container
-                    self.current_resource_usage[resource] +=  self._container_matrix[service][state]*Container_Resource_Usage[state][resource] 
                     
-                    # Tài nguyên tiêu thụ tức thời do chuyển trạng thái
-                    trans_num  = self.formatted_action[0][service]
-                    trans_type = self.formatted_action[1][service]
-                    # Kiểm tra xem chuyển trạng thái xong chưa
-                    if relative_time < Transitions_cost[trans_type][Resource_Type.Time]:
-                        self.current_resource_usage[resource] += Transitions_cost[trans_type][resource]*trans_num 
+                # Tài nguyên tiêu thụ tức thời do chuyển trạng thái    
+                trans_num  = self.formatted_action[0][service]
+                trans_type = self.formatted_action[1][service]
+                # Kiểm tra xem chuyển trạng thái xong chưa
+                if relative_time < Transitions_cost[trans_type][Resource_Type.Time]:
+                    self.current_resource_usage[resource] += Transitions_cost[trans_type][resource]*trans_num 
+                
+                # for state in range(self.num_ctn_states):
+                    # self.current_resource_usage[resource] +=  self._container_matrix[service][state]*Container_Resource_Usage[state][resource] 
+                    
                     
     def _receive_new_requests(self):
-        new_requets = rq.generate_requests(size=self.num_service,
+        num_new_rq = rq.generate_requests(self._in_queue_requests,
+                                           size=self.num_service,
                                            current_time=self.current_time, 
                                            duration=self.timestep,
                                            avg_requests_per_second=self.average_requests,
                                            timeout=self.rq_timeout,
                                            max_rq_active_time=self.max_rq_active_time)
-        self.num_all_rq += len(new_requets)
-        for request in new_requets:
-            self._new_requests[request.type].append(request)
-            self._all_requests[request.type].append(request)
-            self._in_queue_requests[request.type].append(request)
+        self.num_all_rq += num_new_rq
+        self.num_new_rq = num_new_rq
+        # for request in new_requets:
+        #     self._in_queue_requests[request.type].append(request)
         # Sắp xếp lại request trong queue theo thời gian đến hệ thống => FCFS
         for service in range(self.num_service):
             self._in_queue_requests[service].sort(key=lambda x: x.in_queue_time)
@@ -424,16 +414,24 @@ class ServerlessEnv(gym.Env):
             self.terminated = True                      
             
     def _handle_env_change(self):
-        # Xử lý request mỗi giây 1 lần cho 1 timestep
         self._container_matrix += self._negative_action_matrix
         relative_time = 0
         while relative_time < self.timestep:
+            self.current_resource_usage = np.sum(np.dot(self._container_matrix,Container_Resource_Usage),axis=0)
             for service in range(self.num_service):
                 # Chuyển trạng thái container 
+                trans_num  = self.formatted_action[0][service]
                 trans_type = self.formatted_action[1][service]
+                
                 if relative_time == Transitions_cost[trans_type][Resource_Type.Time]:
                     self._container_matrix[service] += self._positive_action_matrix[service]
+                elif relative_time < Transitions_cost[trans_type][Resource_Type.Time]:
+                    # Tài nguyên tiêu thụ tức thời do chuyển trạng thái   
+                    self.current_resource_usage[Resource_Type.CPU] += Transitions_cost[trans_type][Resource_Type.CPU]*trans_num 
+                    self.current_resource_usage[Resource_Type.RAM] += Transitions_cost[trans_type][Resource_Type.RAM]*trans_num 
+                    self.current_resource_usage[Resource_Type.Power] += Transitions_cost[trans_type][Resource_Type.Power]*trans_num
                 
+                # Handle requests in queue
                 for rq in self._in_queue_requests[service][:]:
                     if rq.in_queue_time <= self.current_time:
                         # Giải phóng các request bị time_out
@@ -447,13 +445,23 @@ class ServerlessEnv(gym.Env):
                             if self._container_matrix[service][Container_States.Warm_CPU] > 0:
                                 rq.set_state(Request_States.In_System)
                                 rq.set_in_system_time(self.current_time)
-                                self.num_accepted_rq += 1
+                                self.num_accepted_rq[service] += 1
                                 self._in_system_requests[service].append(rq)
                                 self._in_queue_requests[service].remove(rq)
                                 self._container_matrix[service][Container_States.Active] += 1
                                 self._container_matrix[service][Container_States.Warm_CPU] -= 1
-         
+                                
+                                # Delay penalty được một lần duy nhất tại thời điểm request được hệ thống accept
+                                delay_time = rq.in_system_time - rq.in_queue_time
+                                self.delay_penalty += Request_Resource_Usage[service][Resource_Type.RAM]*self.ram_profit*delay_time
+                                self.delay_penalty += Request_Resource_Usage[service][Resource_Type.CPU]*self.cpu_profit*delay_time
+                                
+                                self.cu_rq_delay[service] += delay_time
+
+                # Handle requests in system
                 for rq in self._in_system_requests[service][:]:
+                    # Tài nguyên tiêu thụ bởi request
+                    self.current_resource_usage += Request_Resource_Usage[service]
                     # Giải phóng các request đã thực hiện xong
                     if rq.active_time == self.current_time - rq.in_system_time:
                         rq.set_state(Request_States.Done)
@@ -462,25 +470,36 @@ class ServerlessEnv(gym.Env):
                         self._in_system_requests[service].remove(rq)
                         self._container_matrix[service][Container_States.Active] -= 1
                         self._container_matrix[service][Container_States.Warm_CPU] += 1
-            
-            
+                        
+                        # Abandone penalty được một lần duy nhất tại thời điểm request hết timeout và bị hệ thống reject
+                        in_queue_time = rq.out_system_time - rq.in_queue_time
+                        self.abandone_penalty += Request_Resource_Usage[service][Resource_Type.RAM]*self.ram_profit*in_queue_time
+                        self.abandone_penalty += Request_Resource_Usage[service][Resource_Type.CPU]*self.ram_profit*in_queue_time
                 
-            # Tính năng lượng tiêu tốn trên toàn bộ hệ thống
-            self._cal_system_resource(relative_time)
-            # Tính reward tức thời cho thời điểm hiện tại
-            self._cal_temp_reward() 
+                # Profit của các request được chấp nhận vào hệ thống trong 1 giây
+                self.profit += Request_Resource_Usage[service][Resource_Type.RAM]*self.ram_profit*self._container_matrix[service][Container_States.Active]
+                self.profit += Request_Resource_Usage[service][Resource_Type.CPU]*self.cpu_profit*self._container_matrix[service][Container_States.Active]
+            
+            self.energy_cost += self.current_resource_usage[Resource_Type.Power]*self.energy_price 
+            self.resource_consumption += self.current_resource_usage
                 
             self.current_time += 1
             relative_time += 1
+        
+
     
+    def _cal_system_evaluation(self):
+        for service in range(self.num_service):    
+            self.num_in_queue_rq[service] = len(self._in_queue_requests[service])
+            self.num_in_sys_rq[service] = self._container_matrix[service][Container_States.Active]
+            self.num_done_rq[service] = len(self._done_requests[service])
+            self.num_rejected_rq[service] = len(self._timeout_requests[service])
+            
     def  _cal_env_matrix(self):
         self._env_matrix[:,0:self.num_ctn_states]=self._container_matrix
         for service in range(self.num_service):
             self._env_matrix[service][self.num_ctn_states+Request_States.In_Queue] = len(self._in_queue_requests[service])
-            # for request in self._in_queue_requests[service]:
-                
-                # if  0 <= self.current_time - request.in_queue_time <= self.timestep:
-                #     self._env_matrix[service][self.num_ctn_states+Request_States.In_Queue] += 1    
+  
                              
     def _cal_temp_reward(self):
         # TODO: đơn giản hóa reward, 
@@ -534,6 +553,11 @@ class ServerlessEnv(gym.Env):
         self.delay_penalty = 0
         self.profit = 0
         self.energy_cost = 0
+        self.num_in_queue_rq.fill(0)
+        self.num_in_sys_rq.fill(0)
+        self.num_done_rq.fill(0)
+        self.num_rejected_rq.fill(0)
+        self.resource_consumption.fill(0)
         self.truncated = False
         self.terminated = False
                  
@@ -551,6 +575,7 @@ class ServerlessEnv(gym.Env):
         self._pre_step(action)
         self._receive_new_requests()   # Nhận request đến hệ thống trong timestep
         self._handle_env_change()   
+        self._cal_system_evaluation()
         observation = self._get_obs()
         reward = self._get_reward()
         self._cal_action_mask()
@@ -575,14 +600,18 @@ class ServerlessEnv(gym.Env):
             f.write("- Number in system request: {}\n".format(self.num_in_sys_rq))
             f.write("- Number done system request: {}\n".format(self.num_done_rq))
             f.write("- Number timeout system request: {}\n".format(self.num_rejected_rq))
+            f.write("- Cumulative request delay : {}\n".format(self.cu_rq_delay))
             f.write("- Rewards: {:.4f} = ".format(self.temp_reward))
             f.write("(Profit: {:.4f}) - ".format(self.profit))
             f.write("{:.4f}*(Abandone penalty: {:.4f}) - ".format(self.alpha, self.abandone_penalty))
             f.write("{:.4f}*(Delay penalty: {:.4f}) - ".format(self.beta, self.delay_penalty))
             f.write("{:.4f}*(Energy cost: {:.4f})\n".format(self.gamma, self.energy_cost))
-            f.write("Energy Consumption : {:.4f}J, ".format(self.current_resource_usage[Resource_Type.Power]))
-            f.write("RAM Consumption  : {:.4f}Gb, ".format(self.current_resource_usage[Resource_Type.RAM]))
-            f.write("CPU Consumption  : {:.4f}Core \n".format(self.current_resource_usage[Resource_Type.CPU]))
+            f.write("Energy consumption over timestep : {:.4f}J, ".format(self.resource_consumption[Resource_Type.Power]))
+            f.write("RAM consumption over timestep  : {:.4f}Gb, ".format(self.resource_consumption[Resource_Type.RAM]))
+            f.write("CPU consumption over timestep  : {:.4f}Core \n".format(self.resource_consumption[Resource_Type.CPU]))
+            f.write("Current energy usage: {:.4f}J, ".format(self.current_resource_usage[Resource_Type.Power]))
+            f.write("Current RAM usage: {:.4f}Gb, ".format(self.current_resource_usage[Resource_Type.RAM]))
+            f.write("Current CPU usage: {:.4f}Core \n".format(self.current_resource_usage[Resource_Type.CPU]))
             
     def action_to_number(self, action_matrix):
         index = 0
