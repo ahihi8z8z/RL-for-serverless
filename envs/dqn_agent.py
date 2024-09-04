@@ -42,9 +42,9 @@ class Agent:
 
         non_final_next_states = [s for nonfinal,s in zip(non_final_mask, batch.next_state) if nonfinal > 0]
         non_final_next_states = T.stack(non_final_next_states).to(self.device)
-        state_batch = T.stack(batch.state).to(self.device)
-        action_batch = T.cat(batch.action).to(self.device)
-        reward_batch = T.cat(batch.reward).to(self.device)
+        state_batch = T.stack(batch.state)
+        action_batch = T.cat(batch.action)
+        reward_batch = T.cat(batch.reward)
 
         state_action_values = self.policy_net(state_batch).gather(1, action_batch)
 
@@ -60,6 +60,9 @@ class Agent:
         for param in self.policy_net.parameters():
             param.grad.data.clamp_(-1e-1, 1e-1)
         self.policy_net.optimizer.step()
+        
+        del loss 
+        del state_action_values
         
     
     def select_action_softmax(self, q_values, tau):
