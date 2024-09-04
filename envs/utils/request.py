@@ -7,12 +7,12 @@ Define resource usage for request type:
  request_type: [RAM, CPU, Power]
     
 '''    
-Request_usage = np.array([np.array([10, 10, 10]),
-                          np.array([20, 20, 20]),
-                          np.array([30, 30, 30]),
-                          np.array([40, 40, 40])])
+Request_Resource_Usage = np.array([np.array([10, 10, 100]),
+                                   np.array([20, 20, 200]),
+                                   np.array([30, 30, 300]),
+                                   np.array([40, 40, 400])])
 
-Request_active_time = np.array([240, 200, 300, 400])
+Request_active_time = np.array([240, 360, 480, 600])
 
 def ran_norm_gen(mean, std_dev):
     # Generate a random value following normal distribution
@@ -38,7 +38,7 @@ class Request():
         self.set_resource_usage()
 
     def set_resource_usage(self):
-        self.resource_usage = Request_usage[self.type]
+        self.resource_usage = Request_Resource_Usage[self.type]
         
     def set_active_time(self, a):
         self.active_time = a
@@ -58,12 +58,12 @@ class Request():
     def set_state(self, state):
         self.state = state
 
-def generate_requests( current_time, size: int = 4, duration: int = 10, avg_requests_per_second: float = 2, timeout: int = 10, max_rq_active_time: int = 240):
+def generate_requests(queue, current_time, size, duration, avg_requests_per_second, timeout, max_rq_active_time):
     rng = np.random.default_rng()
     num_requests = rng.poisson(avg_requests_per_second * duration)
     inter_arrival_times = rng.exponential(1.0 / avg_requests_per_second, num_requests)
     arrival_times = np.cumsum(inter_arrival_times)
-    requests = []
+    num_new_rq = np.zeros(size,dtype=np.int32)
     
     for arrival_time in arrival_times:
         # Kiểm tra nếu thời gian đến vẫn nằm trong khoảng thời gian duration
@@ -71,10 +71,11 @@ def generate_requests( current_time, size: int = 4, duration: int = 10, avg_requ
             type = rng.integers(0, size)
             
             if max_rq_active_time["type"] == "random":
-                active_time = ran_norm_gen(max_rq_active_time["value"], max_rq_active_time["value"]/10)
+                active_time = ran_norm_gen(max_rq_active_time["value"][type], max_rq_active_time["value"][type]/10)
             else:
-                active_time = max_rq_active_time["value"] if max_rq_active_time["value"] else Request_active_time[type]
+                active_time = max_rq_active_time["value"][type] if max_rq_active_time["value"][type] else Request_active_time[type]
             
-            request = Request(type=type, in_queue_time=int(arrival_time+current_time), timeout=timeout, active_time=active_time)    
-            requests.append(request)
-    return requests
+            request = Request(type=type, in_queue_time=int(arrival_time+current_time), timeout=timeout[type], active_time=active_time)    
+            queue[type].append(request)
+            num_new_rq[type] += 1
+    return num_new_rq
