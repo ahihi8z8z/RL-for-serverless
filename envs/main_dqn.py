@@ -1,5 +1,6 @@
 import numpy as np
 from rlss_envs import ServerlessEnv 
+from rlss_envs import Container_States
 from dqn_agent import Agent as dqn
 from gymnasium import spaces
 import matplotlib.pyplot as plt
@@ -13,11 +14,11 @@ import re
 
 now = datetime.now()
 folder_base = f"result/result_{now.month}_{now.day}_{now.hour}_{now.minute}_{now.second}"
+num_ctn_states = len(Container_States.State_Name)
 
 def plot_log_fig(log_folder):
     log_file = os.path.join(log_folder, 'log.txt')
 
-    # Đọc file log
     with open(log_file, 'r') as file:
         log_data = file.read()
     
@@ -25,56 +26,65 @@ def plot_log_fig(log_folder):
     training_num_match = training_num_pattern.search(log_data)   
     training_num = int(training_num_match.group(1))
     
-    
-    # Lấy giá trị timestep từ ENVIRONMENT PARAMETERS
+    service_num_pattern = re.compile(r'"num_service": (\d+),')
+    service_num_match = service_num_pattern.search(log_data)   
+    service_num = int(service_num_match.group(1))
+
     timestep_pattern = re.compile(r'"timestep": (\d+),')
     timestep_match = timestep_pattern.search(log_data)
     if timestep_match:
         timestep_value = int(timestep_match.group(1))
 
-    # Tìm các khối "SYSTEM EVALUATION PARAMETERS IN TIMESTEP"
     timestep_blocks = re.findall(r'SYSTEM EVALUATION PARAMETERS IN TIMESTEP \d+:.*?(?=SYSTEM EVALUATION PARAMETERS IN TIMESTEP \d+:|\Z)', log_data, re.S)
 
-    # Khởi tạo các danh sách để lưu trữ giá trị
     new_rqs = []
     in_queue_rqs = []
     in_sys_rqs = []
     done_rqs = []
     rewards = []
     energy_consumptions = []
+    cu_rq_delays = []
+    container_states = []
+    cu_accepted_rqs = []
 
-    # Trích xuất các thông số từ mỗi khối
     for i, block in enumerate(timestep_blocks, start=1):
-        new_rq_match = re.search(r'Number new request\s*:\s*(\d+)', block)
-        new_rq = int(new_rq_match.group(1)) if new_rq_match else None
+        container_state_match = re.search(r"Containers state after action:\s*\[\s*((?:\[\s*[\d\s]+]\s*)+)\]", block)
+        container_state = [list(map(int, re.findall(r'\d+', row))) for row in container_state_match.group(1).split(']\n')]
         
-        in_queue_rq_match = re.search(r'Number in queue request\s*:\s*(\d+)', block)
-        in_queue_rq = int(in_queue_rq_match.group(1)) if in_queue_rq_match else None
+        cu_accepted_rq_match = re.search(r"Cumulative number accpeted request\s*:\s*\[\s*([\d\s]+)\]", block)
+        cu_accepted_rq = np.array(list(map(int, cu_accepted_rq_match.group(1).split()))) if cu_accepted_rq_match else None
         
-        in_sys_rq_match = re.search(r'Number in system request\s*:\s*(\d+)', block)
-        in_sys_rq = int(in_sys_rq_match.group(1)) if in_sys_rq_match else None
+        new_rq_match = re.search(r'Number new request\s*:\s*\[\s*([\d\s]+)\]', block)
+        new_rq = np.array(list(map(int, new_rq_match.group(1).split()))) if new_rq_match else None
         
-        # Tìm Cumulative number accepted request
-        done_rq_match = re.search(r'Number done system request\s*:\s*(\d+)', block)
-        done_rq = int(done_rq_match.group(1)) if done_rq_match else None
+        in_queue_rq_match = re.search(r'Number in queue request\s*:\s*\[\s*([\d\s]+)\]', block)
+        in_queue_rq = np.array(list(map(int, in_queue_rq_match.group(1).split()))) if in_queue_rq_match else None
         
-        # Tìm Rewards
+        in_sys_rq_match = re.search(r'Number in system request\s*:\s*\[\s*([\d\s]+)\]', block)
+        in_sys_rq = np.array(list(map(int, in_sys_rq_match.group(1).split()))) if in_sys_rq_match else None
+        
+        done_rq_match = re.search(r'Number done system request\s*:\s*\[\s*([\d\s]+)\]', block)
+        done_rq = np.array(list(map(int, done_rq_match.group(1).split()))) if done_rq_match else None
+        
+        cu_rq_delay_match = re.search(r"Cumulative request delay\s*:\s*\[\s*([\d\s]+)\]", block)
+        cu_rq_delay = np.array(list(map(int, cu_rq_delay_match.group(1).split()))) if cu_rq_delay_match else None
+        
         rewards_match = re.search(r'Rewards\s*:\s*([-\d.]+)', block)
         reward = float(rewards_match.group(1)) if rewards_match else None
         
-        # Tìm Energy Consumption
-        energy_match = re.search(r'Energy Consumption\s*:\s*([\d.]+)J', block)
+        energy_match = re.search(r"Energy consumption over timestep\s*:\s*([\d\.]+)J", block)
         energy_consumption = float(energy_match.group(1)) if energy_match else None
         
-        # Lưu các thông số vào danh sách
         new_rqs.append(new_rq)
         in_queue_rqs.append(in_queue_rq)
         in_sys_rqs.append(in_sys_rq)
         done_rqs.append(done_rq)
         rewards.append(reward)
         energy_consumptions.append(energy_consumption)
+        cu_rq_delays.append(cu_rq_delay)
+        container_states.append(container_state)
+        cu_accepted_rqs.append(cu_accepted_rq)
 
-    # Tính toán accepted ratio
     acceptance_ratio = [
         (in_sys_rqs[i] + done_rqs[i] - (in_sys_rqs[i-1] if i > 0 else 0)) /
         ((in_queue_rqs[i-1] if i > 0 else 0) + new_rqs[i])
@@ -84,8 +94,10 @@ def plot_log_fig(log_folder):
     energy_consumptions = np.array(energy_consumptions)
     acceptance_ratio = np.array(acceptance_ratio)
     rewards = np.array(rewards)
-
-    num_step = len(acceptance_ratio) // training_num
+    cu_rq_delays = np.array(cu_rq_delays)
+    container_states = np.array(container_states)
+    cu_accepted_rqs = np.array(cu_accepted_rqs)
+    num_step = len(energy_consumptions) // training_num
     
     avg_energy_consumptions = [
         np.mean(energy_consumptions[i::num_step]) 
@@ -93,10 +105,23 @@ def plot_log_fig(log_folder):
     ]
 
     avg_acceptance_ratio = [
-        np.mean(acceptance_ratio[i::num_step]) 
+        np.mean(acceptance_ratio[i::num_step],axis=0) 
         for i in range(num_step)
     ]
+    avg_acceptance_ratio = np.array(avg_acceptance_ratio)
     
+    cu_rq_delays = np.array([np.mean(cu_rq_delays[::num_step],axis=0)])
+    cu_accepted_rqs = np.array([np.mean(cu_accepted_rqs[::num_step],axis=0)])
+    avg_cu_rq_delay = cu_rq_delays / cu_accepted_rqs
+    
+    avg_container_state = np.array([
+        np.mean(container_states[i::num_step],axis=0) 
+        for i in range(num_step)
+    ])
+    avg_container_state = np.split(avg_container_state,service_num,axis=1)
+    avg_container_state = [arr.squeeze(axis=1) for arr in avg_container_state]
+    print(avg_container_state[0].shape)
+  
     avg_rewards = [
         np.mean(rewards[i::num_step]) 
         for i in range(num_step)
@@ -104,36 +129,62 @@ def plot_log_fig(log_folder):
     
     timesteps = np.arange(len(avg_energy_consumptions)) * timestep_value
     
-    # Vẽ accepted ratio trung bình theo thời gian
+    # Plot acceptance ratio
     plt.figure()
-    plt.plot(timesteps, avg_acceptance_ratio, label='Avg Acceptance Ratio Over {} Episodes'.format(training_num), color='purple')
+    for i in range(service_num):
+        plt.plot(avg_acceptance_ratio[:, i], label=f'Service {i+1}')
     plt.xlabel('Time (seconds)')
     plt.ylabel('Acceptance Ratio')
     plt.title('Avg Acceptance Ratio Over {} Episodes'.format(training_num))
     plt.grid(True)
-    plt.savefig(os.path.join(log_folder, 'acceptance_ratio_plot.png'))  # Lưu hình
+    plt.legend()
+    plt.savefig(os.path.join(log_folder, 'acceptance_ratio.png'))  
+    
+    # Plot avg request delay 
+    plt.figure()
+    plt.bar(np.arange(1,service_num+1),avg_cu_rq_delay[0, :])
+    plt.xlabel('Service')
+    plt.ylabel('Delay time per accepted request')
+    plt.title('Avg Request Delay Time Over {} Episodes'.format(training_num))
+    plt.xticks(np.arange(1,service_num+1))
+    plt.savefig(os.path.join(log_folder, 'delay.png'))  
 
-    # Hình Rewards
+    # Plot reward
     plt.figure()
     plt.plot(timesteps, avg_rewards, label='Avg Rewards Over {} Episodes'.format(training_num), color='red')
     plt.xlabel('Time (seconds)')
     plt.ylabel('Rewards')
     plt.title('Avg Rewards Over {} Episodes'.format(training_num))
     plt.grid(True)
-    plt.savefig(os.path.join(log_folder, 'rewards_plot.png'))  # Lưu hình
+    plt.savefig(os.path.join(log_folder, 'rewards_plot.png'))  
 
-    # Hình Energy Consumption
+    # Plot Energy consumption
     plt.figure()
     plt.plot(timesteps, avg_energy_consumptions, label='Avg Energy Consumption Over {} Episodes'.format(training_num), color='orange')
     plt.xlabel('Time (seconds)')
     plt.ylabel('Energy Consumption (J)')
     plt.title('Avg Energy Consumption Over {} Episodes'.format(training_num))
     plt.grid(True)
-    plt.savefig(os.path.join(log_folder, 'energy_consumption_plot.png'))  # Lưu hình
+    plt.savefig(os.path.join(log_folder, 'energy_consumption_plot.png'))  
+    
+    # Plot container state
+    for service in range(service_num):
+        plt.figure()
+
+        # Plot stacked area chart
+        plt.stackplot(timesteps, avg_container_state[service].T, labels=[f'{Container_States.State_Name[i]}' for i in range(num_ctn_states)])
+
+        # Thêm nhãn, tiêu đề, và legend
+        plt.xlabel('Time')
+        plt.ylabel('Number container')
+        plt.title('Ratio between container states of service {}'.format(service))
+        plt.legend()
+        plt.savefig(os.path.join(log_folder, 'state_service_{}.png'.format(service))) 
 
     
 # testing the trained model
 def test(args, env_config, drl_hyper_params):
+    global folder_base
     if args['folder'] is not None:
         folder_base =  args['folder']
         
@@ -243,15 +294,23 @@ def train(args, env_config, drl_hyper_params):
         cum_reward = 0
         sub_episode = 0
         while not done:
+            t1 = time.time()
             action = agent.get_action(state=state,env=env,epsilon=drl_hyper_params["epsilon"])
+            print("get action: {}\n".format(time.time()-t1))
+            t1 = time.time()
             next_state, reward, done, _ = env.step(action)
+            print("step: {}\n".format(time.time()-t1))
+            t1 = time.time()
             env.render()
+            print("render: {}\n".format(time.time()-t1))
+            t1 = time.time()
             tab[e * env.current_time + env.current_time] = {"action": action, "reward": reward, "next_state": next_state}
             next_state = np.reshape(next_state, [state_dim])
             agent.store_transition(state, action, reward, next_state, done)
             state = next_state
             agent.learn()
             rewards.append(reward)
+            print("other: {}\n".format(time.time()-t1))
             cum_reward += reward
             sub_episode += 1
             
@@ -285,7 +344,7 @@ def train(args, env_config, drl_hyper_params):
             means = torch.cat((torch.zeros(drl_hyper_params["max_env_steps"]-1), means))
             plt.plot(means.numpy())
         # plt.pause(0.001)  # pause a bit so that plots are updated
-        plt.savefig(os.path.join(folder_name,'live_average_re0wards_DQN.png'))
+        plt.savefig(os.path.join(folder_name,'live_average_rewards_DQN.png'))
         plt.close()
         agent.save_models()
         
@@ -320,13 +379,13 @@ def train(args, env_config, drl_hyper_params):
 
 def main(args):
     # Environment variable
-    num_service = 1
+    num_service = 2
     timestep = 120
-    num_container = [100]
+    num_container = [80, 20]
     container_lifetime = 3600*8
-    rq_timeout = 20
-    average_requests = 160/60
-    max_rq_active_time = {"type": "random", "value": 60}
+    rq_timeout = [20,40]
+    average_requests = 80/60
+    max_rq_active_time = {"type": "random", "value": [60,100]}
     energy_price = 10e-8 
     ram_profit = 10e-5
     cpu_profit = 10e-5
@@ -336,7 +395,7 @@ def main(args):
 
 
     # DQN_agent
-    episodes = 2000                        # Total episodes for the training
+    episodes = 10                        # Total episodes for the training
     batch_size = 32                        # Total used memory in memory replay mode
     max_env_steps = 50                    # Max steps per episode
     batch_update = 20
