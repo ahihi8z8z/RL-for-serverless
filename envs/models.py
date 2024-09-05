@@ -46,7 +46,6 @@ class GenericNetwork(nn.Module):
         :param state:
         :return: Q(s, a) or Q(s(t+1), a')
         """
-        # x = torch.Tensor(state).to(self.device)
         x = F.relu(self.fc1(state.to(self.device)))
         x = F.relu(self.fc2(x))
         x = self.fc3(x)

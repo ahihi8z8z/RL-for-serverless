@@ -308,7 +308,7 @@ class ServerlessEnv(gym.Env):
         self.temp_reward = self.profit - (self.alpha*self.delay_penalty + self.beta*self.abandone_penalty + self.gamma*self.energy_cost)
         return self.temp_reward
     
-    def reset(self, seed=None, options=None):
+    def reset(self, seed=42, options=None):
         '''
         Initialize the environment
         '''
