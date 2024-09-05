@@ -89,7 +89,7 @@ class Agent:
         if sample > epsilon:
             with T.no_grad():
                 state = T.from_numpy(state).float()
-                q_values = self.policy_net(state)
+                q_values = self.policy_net(state).cpu()
                 action_mask_tensor = T.tensor(env.action_mask)
                 q_values[action_mask_tensor == 0] = float('-inf')
                 self.action[self.j] = {'list_of_actions': q_values, 
