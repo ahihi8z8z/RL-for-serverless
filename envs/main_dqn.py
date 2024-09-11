@@ -47,7 +47,7 @@ def test(args, env_config, drl_hyper_params):
     agent.load_models()
 
     if args['observe'] is None:
-        eps = 1
+        eps = 3
     else:
         eps = int(args['observe'])  
       
@@ -82,7 +82,6 @@ def test(args, env_config, drl_hyper_params):
             f.write("\n********************************************************************************\n\n\n")
     
     plot_log_fig(folder_name)
-          
 # Training the model            
 def train(args, env_config, drl_hyper_params):
     folder_name = os.path.join(folder_base, 'train')
@@ -204,13 +203,13 @@ def train(args, env_config, drl_hyper_params):
 
 def main(args):
     # Environment variable
-    num_service = 2
+    num_service = 1
     timestep = 120
-    num_container = [40, 60]
-    container_lifetime = 3600*4
-    rq_timeout = [20,40]
-    average_requests = 80/timestep
-    max_rq_active_time = {"type": "random", "value": [40,60]}
+    num_container = [10000]
+    container_lifetime = 3600*8
+    rq_timeout = [20]
+    average_requests = 160/timestep
+    max_rq_active_time = {"type": "random", "value": [60]}
     energy_price = 10e-8 
     ram_profit = 10e-5
     cpu_profit = 10e-5
@@ -220,10 +219,10 @@ def main(args):
 
 
     # DQN_agent
-    episodes = 200                        # Total episodes for the training
+    episodes = 8000                        # Total episodes for the training
     batch_size = 32                        # Total used memory in memory replay mode
     max_env_steps = 50                    # Max steps per episode
-    batch_update = 5
+    batch_update = 20
     
     replay_buffer_size=50000
     hidden_size=64
@@ -266,10 +265,7 @@ def main(args):
         test(args, env_config, drl_hyper_params)
     else:
         train(args, env_config, drl_hyper_params)
-        test(args, env_config, drl_hyper_params)
-        
-
-
+        test(args, env_config, drl_hyper_params)       
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Parsing the type of DRL/RL to be tested')

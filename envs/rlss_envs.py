@@ -78,7 +78,7 @@ State_trans_mapping =np.array([np.array([1,2]),                 # N
 Define transition cost for moving to another states:
  state: [RAM, CPU, Power, Time]  
 '''    
-Transitions_cost = np.array([np.array([2, 0, 0, 0]),         # No change 
+Transitions_cost = np.array([np.array([2, 0, 0, ]),         # No change 
                              np.array([0, 0, 50, 5]),          # N -> L0
                              np.array([1, 0, 2150, 62]),     # N -> L2
                              np.array([0, 0, 50, 2]),          # L0 -> N
@@ -139,7 +139,7 @@ class ServerlessEnv(gym.Env):
         self.max_num_request = int(self.average_requests*self.timestep*2)  # Set the limit number of requests that can exist in the system 
         
         self.num_resources = len([attr for attr in vars(Resource_Type) if not attr.startswith('__')]) - 1    # The number of resource parameters (RAM, CPU, Power)
-        self.limited_resource = [1000,1000]  # Set limited amount of [RAM,CPU] of system
+        self.limited_resource = [4000,4000]  # Set limited amount of [RAM,CPU] of system
         self.energy_price = env_config["energy_price"] # unit cent/Jun/s 
         self.ram_profit = env_config["ram_profit"] # unit cent/Gb/s
         self.cpu_profit = env_config["cpu_profit"] # unit cent/vcpu/s
@@ -350,24 +350,6 @@ class ServerlessEnv(gym.Env):
         
         return observation
      
-    def _cal_system_resource(self, relative_time):
-        # Tài nguyên tiêu thụ tức thời tại các trạng thái của container
-        self.current_resource_usage = np.sum(np.dot(self._container_matrix,Container_Resource_Usage),axis=0)
-        for resource in range(self.num_resources):
-            for service in range(self.num_service):
-                # Tài nguyên tiêu thụ tức thời bởi các request trong hệ thống
-                for request in self._in_system_requests[service]:
-                    self.current_resource_usage[resource] += request.resource_usage[resource]
-                    
-                # Tài nguyên tiêu thụ tức thời do chuyển trạng thái    
-                trans_num  = self.formatted_action[0][service]
-                trans_type = self.formatted_action[1][service]
-                # Kiểm tra xem chuyển trạng thái xong chưa
-                if relative_time < Transitions_cost[trans_type][Resource_Type.Time]:
-                    self.current_resource_usage[resource] += Transitions_cost[trans_type][resource]*trans_num 
-                
-                # for state in range(self.num_ctn_states):
-                    # self.current_resource_usage[resource] +=  self._container_matrix[service][state]*Container_Resource_Usage[state][resource] 
                     
                     
     def _receive_new_requests(self):
@@ -399,15 +381,6 @@ class ServerlessEnv(gym.Env):
             print(self.number_to_action(self.current_action))
             print(self.current_time)
         
-        # Truncated nêú action làm tràn tài nguyên hệ thống
-        # TODO: Phần này cần xem xét lại vì request đến cũng có thể là tràn tài nguyên hệ thống
-        # self._cal_system_resource()      
-        # if self.current_resource_usage[Resource_Type.RAM] > self.limited_resource[Resource_Type.RAM]:
-        #     self.truncated = True
-        #     self.truncated_reason = "RAM overloaded"
-        # if self.current_resource_usage[ Resource_Type.CPU] > self.limited_resource[Resource_Type.CPU]:
-        #     self.truncated = True
-        #     self.truncated_reason = "CPU overloaded"
             
     def _set_terminated(self):
         if (self.current_time >= self.container_lifetime):
@@ -500,34 +473,6 @@ class ServerlessEnv(gym.Env):
         for service in range(self.num_service):
             self._env_matrix[service][self.num_ctn_states+Request_States.In_Queue] = len(self._in_queue_requests[service])
   
-                             
-    def _cal_temp_reward(self):
-        # TODO: đơn giản hóa reward, 
-        # TODO: thêm based resource cho compute node chạy container để tránh tình trạng bật tất cả container warm cpu
-        # TODO: nghĩ thêm về cách tính reward
-        # TODO: phân tích các input có thể ảnh hướng đến kết quả
-        self.energy_cost += self.current_resource_usage[Resource_Type.Power]*self.energy_price
-        
-        for service in range(self.num_service):
-            for request in self._in_system_requests[service]:
-                if request.in_system_time == self.current_time:
-                    # Delay penalty ở đây hiểu là tiền bị thiệt hại do request không được phục vụ ngay mà phải nằm trong queue
-                    # Delay penalty chỉ tính cho nhhững request được phục vụ bởi hệ thống, những request bị timeout sẽ tính vào abandone penalty
-                    # Delay penalty được một lần duy nhất tại thời điểm request được hệ thống accept
-                    delay_time = request.in_system_time - request.in_queue_time
-                    self.delay_penalty += Request_Resource_Usage[service][Resource_Type.RAM]*self.ram_profit*delay_time
-                    self.delay_penalty += Request_Resource_Usage[service][Resource_Type.CPU]*self.cpu_profit*delay_time
-                else:
-                    # Profit của các request được chấp nhận vào hệ thống trong 1 giây
-                    self.profit += Request_Resource_Usage[service][Resource_Type.RAM]*self.ram_profit
-                    self.profit += Request_Resource_Usage[service][Resource_Type.CPU]*self.cpu_profit
-                
-            for request in self._timeout_requests[service]:
-                if request.out_system_time == self.current_time:
-                    # Abandone penalty được một lần duy nhất tại thời điểm request hết timeout và bị hệ thống reject
-                    in_queue_time = request.out_system_time - request.in_queue_time
-                    self.abandone_penalty += Request_Resource_Usage[service][Resource_Type.RAM]*self.ram_profit*in_queue_time
-                    self.abandone_penalty += Request_Resource_Usage[service][Resource_Type.CPU]*self.ram_profit*in_queue_time
     
     def _action_to_matrix(self,index):
         self.current_action = index
@@ -566,9 +511,6 @@ class ServerlessEnv(gym.Env):
         self.formatted_action = self._action_to_matrix(action)
         self._set_terminated()
         self._set_truncated()
-        # if not self.truncated and not self.terminated:
-        # # if not self.terminated:
-        #     self._apply_action()     # Thay đổi ma trận trạng thái của container
         
         
     def step(self, action):

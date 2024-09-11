@@ -70,8 +70,8 @@ class Agent:
         sample = random.random()
         if sample > epsilon:
             with T.no_grad():
-                self.action[self.j] = {'list_of_actions': q_values, 
-                                       'max': T.argmax(q_values).item()}
+                # self.action[self.j] = {'list_of_actions': q_values, 
+                #                        'max': T.argmax(q_values).item()}
                 self.j += 1
                 return T.argmax(q_values).item() 
         else:
@@ -92,8 +92,8 @@ class Agent:
                 q_values = self.policy_net(state).cpu()
                 action_mask_tensor = T.tensor(env.action_mask)
                 q_values[action_mask_tensor == 0] = float('-inf')
-                self.action[self.j] = {'list_of_actions': q_values, 
-                                       'max': T.argmax(q_values).item()}
+                # self.action[self.j] = {'list_of_actions': q_values, 
+                #                        'max': T.argmax(q_values).item()}
                 self.j += 1
                 action = T.argmax(q_values).item()
         else:
